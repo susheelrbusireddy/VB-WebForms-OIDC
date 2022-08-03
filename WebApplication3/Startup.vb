@@ -11,6 +11,7 @@ Imports Microsoft.Owin.Security.OpenIdConnect
 Imports Microsoft.Owin.Security.Notifications
 Imports Owin
 Imports System.Security.Claims
+Imports Microsoft.Owin.Host.SystemWeb
 
 <Assembly: OwinStartup(GetType(Startup))>
 Public Class Startup
@@ -19,16 +20,18 @@ Public Class Startup
     Private ReadOnly _clientSecret As String = Utils.GetOktaSetting("ClientSecret")
     Private ReadOnly _redirectUri As String = Utils.GetOktaSetting("RedirectUri")
 
-    <Obsolete>
+
     Public Sub Configuration(app As IAppBuilder)
         ConfigureAuth(app)
     End Sub
 
-    <Obsolete>
     Public Sub ConfigureAuth(app As IAppBuilder)
         app.UseExternalSignInCookie(DefaultAuthenticationTypes.ExternalCookie)
         app.SetDefaultSignInAsAuthenticationType(CookieAuthenticationDefaults.AuthenticationType)
-        app.UseCookieAuthentication(New CookieAuthenticationOptions())
+        app.UseCookieAuthentication(New CookieAuthenticationOptions With
+            {
+                .CookieManager = New SystemWebCookieManager()
+            })
 
         app.UseOpenIdConnectAuthentication(New OpenIdConnectAuthenticationOptions With
             {
@@ -36,34 +39,9 @@ Public Class Startup
                 .ClientSecret = _clientSecret,
                 .Authority = _authority,
                 .RedirectUri = _redirectUri,
-                .ResponseType = OpenIdConnectResponseType.CodeToken,
-                .Scope = OpenIdConnectScope.OpenIdProfile,
-                .SaveTokens = True,
-                .RedeemCode = True,
-                .TokenValidationParameters = New TokenValidationParameters With {.ValidateIssuer = False},
-                .Notifications = New OpenIdConnectAuthenticationNotifications With
-                    {
-                        .AuthorizationCodeReceived = Async Function(n)
-                                                         ' Exchange code for access And ID tokens
-                                                         Dim tokenClient As New TokenClient($"{_authority}/v1/token", _clientId, _clientSecret)
-                                                         Dim TokenResponse As TokenResponse = Await tokenClient.RequestAuthorizationCodeAsync(n.Code, _redirectUri)
-                                                         If (TokenResponse.IsError) Then
-                                                             Throw New Exception(TokenResponse.Error)
-                                                         End If
-
-                                                         Dim userInfoClient As New UserInfoClient($"{_authority}/v1/userinfo")
-                                                         Dim UserInfoResponse As UserInfoResponse = Await userInfoClient.GetAsync(TokenResponse.AccessToken)
-
-                                                         Dim claims As New List(Of System.Security.Claims.Claim)(UserInfoResponse.Claims) From {
-                                                             New Claim("id_token", TokenResponse.IdentityToken),
-                                                             New Claim("access_token", TokenResponse.AccessToken)
-                                                         }
-
-                                                         n.AuthenticationTicket.Identity.AddClaims(claims)                                                        
-
-                                                     End Function
-                    }
+                .ResponseType = OpenIdConnectResponseType.CodeIdToken,
+                .Scope = "openid profile email"
             })
-
+            
     End Sub
 End Class
